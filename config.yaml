@@ -1,0 +1,26 @@
+models:
+  # NOTE: 초기 구현은 sonnet 단일 모델 사용
+  # v0.2 에서 critic → opus 교체
+  # v0.3 에서 classifier → haiku 분리 (3-tier)
+  profile_analyzer: "claude-sonnet-4-6"
+  curriculum_designer: "claude-sonnet-4-6"
+  resource_curator: "claude-sonnet-4-6"
+  critic: "claude-sonnet-4-6"
+
+pipeline:
+  max_retry: 2
+  timeout_seconds: 120
+
+confluence:
+  templates:
+    curriculum_page_title: "[AI Generated] {topic} 학습 커리큘럼 - {depth}"
+    section_headers:
+      - "📋 개요"
+      - "🎯 학습 목표"
+      - "📚 커리큘럼"
+      - "🔗 참고 자료"
+      - "✅ 검증 결과"
+
+github:
+  max_repos: 20
+  max_commits_per_repo: 10

@@ -136,6 +136,49 @@ class TestProfileAnalyzer:
         assert "tech_stack" in result
         assert "FastAPI" in result.get("interests", [])
 
+    def test_profile_analyzer_uses_haiku_model(self):
+        """v0.3: ProfileAnalyzer가 Haiku 4.5 모델을 사용하는지 확인."""
+        from agents.profile_analyzer import MODEL, ProfileAnalyzer
+
+        assert MODEL == "claude-haiku-4-5", (
+            f"ProfileAnalyzer는 Haiku 4.5를 사용해야 합니다. 현재: {MODEL}"
+        )
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _make_mock_response(MOCK_PROFILE)
+        analyzer = ProfileAnalyzer(client=mock_client)
+        assert analyzer.model == "claude-haiku-4-5"
+
+
+# ─── Unit: 3-tier 모델 라우팅 검증 ───────────────────────────────────────────
+
+class TestModelTierRouting:
+    """3-tier 모델 분리 아키텍처 검증."""
+
+    def test_tier1_uses_haiku(self):
+        """Tier 1 (분류·태깅) — Haiku 4.5 사용."""
+        from agents.profile_analyzer import MODEL as ANALYZER_MODEL
+        assert ANALYZER_MODEL == "claude-haiku-4-5"
+
+    def test_tier2_uses_sonnet(self):
+        """Tier 2 (생성·설계) — Sonnet 4.6 사용."""
+        from agents.curriculum_designer import MODEL as DESIGNER_MODEL
+        from agents.resource_curator import MODEL as CURATOR_MODEL
+        assert DESIGNER_MODEL == "claude-sonnet-4-6"
+        assert CURATOR_MODEL == "claude-sonnet-4-6"
+
+    def test_tier3_uses_opus(self):
+        """Tier 3 (검증) — Opus 4.7 사용."""
+        from agents.critic import MODEL as CRITIC_MODEL
+        assert CRITIC_MODEL == "claude-opus-4-7"
+
+    def test_all_tiers_distinct(self):
+        """세 Tier가 모두 다른 모델을 사용하는지 확인."""
+        from agents.critic import MODEL as CRITIC_MODEL
+        from agents.curriculum_designer import MODEL as DESIGNER_MODEL
+        from agents.profile_analyzer import MODEL as ANALYZER_MODEL
+        models = {ANALYZER_MODEL, DESIGNER_MODEL, CRITIC_MODEL}
+        assert len(models) == 3, "3-tier는 서로 다른 모델을 사용해야 합니다."
+
 
 # ─── Unit: CurriculumDesigner ────────────────────────────────────────────────
 

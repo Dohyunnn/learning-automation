@@ -3,7 +3,14 @@
 GitHub 데이터와 Confluence 이력을 바탕으로 사용자 기술 스택·숙련도 프로파일을 생성한다.
 
 v0.1 — claude-sonnet-4-6 사용
-v0.3 — claude-haiku-4-5 로 교체 (빠른 분류·태깅, 비용 절감)
+v0.2 — (Critic만 Opus로 교체, 이 에이전트는 유지)
+v0.3 — claude-haiku-4-5 로 교체
+
+[v0.3 변경 이유]
+프로파일 분석은 구조화된 데이터(GitHub repos, 언어 목록)를 분류·태깅하는
+단순 분류 작업에 가깝다. 복잡한 추론보다 빠른 처리 속도가 중요하므로
+Haiku 4.5로 교체해 응답 속도와 API 비용을 동시에 절감한다.
+→ Haiku: 분류·태깅 / Sonnet: 생성·설계 / Opus: 검증 (3-tier)
 """
 import json
 import logging
@@ -13,8 +20,8 @@ import anthropic
 
 logger = logging.getLogger(__name__)
 
-# v0.1: 단일 Sonnet 모델
-MODEL = "claude-sonnet-4-6"
+# v0.3: Haiku 4.5로 교체 — 빠른 분류·태깅, 비용 최적화
+MODEL = "claude-haiku-4-5"
 
 SYSTEM_PROMPT = """당신은 개발자 프로파일 분석 전문가입니다.
 GitHub 저장소 데이터와 Confluence 학습 이력을 분석해

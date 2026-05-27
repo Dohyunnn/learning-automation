@@ -1,11 +1,14 @@
 models:
-  # v0.1 — 단일 Sonnet 모델
-  # v0.2 — critic → Opus 4.7 교체 (검증 품질 강화)
-  # v0.3 — profile_analyzer → Haiku 4.5 분리 (3-tier 비용 최적화)
-  profile_analyzer: "claude-sonnet-4-6"
-  curriculum_designer: "claude-sonnet-4-6"
-  resource_curator: "claude-sonnet-4-6"
-  critic: "claude-opus-4-7"    # v0.2: Sonnet → Opus (강력한 교차 검증)
+  # ┌─────────────────────────────────────────────────────────────────┐
+  # │  3-tier 모델 라우팅 (v0.3)                                       │
+  # │  Tier 1 (Haiku 4.5)  : 분류·태깅   — 빠름, 저비용               │
+  # │  Tier 2 (Sonnet 4.6) : 생성·설계   — 품질/비용 균형             │
+  # │  Tier 3 (Opus 4.7)   : 검증·교차확인 — 최고 정밀도              │
+  # └─────────────────────────────────────────────────────────────────┘
+  profile_analyzer: "claude-haiku-4-5"   # v0.3: Haiku — 분류·태깅
+  curriculum_designer: "claude-sonnet-4-6" # Sonnet — 커리큘럼 생성
+  resource_curator: "claude-sonnet-4-6"  # Sonnet — 리소스 큐레이션
+  critic: "claude-opus-4-7"             # v0.2: Opus — 최종 검증
 
 pipeline:
   max_retry: 2

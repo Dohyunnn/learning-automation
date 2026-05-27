@@ -3,7 +3,12 @@
 커리큘럼과 리소스의 품질·정확도·할루시네이션을 검증한다.
 
 v0.1 — claude-sonnet-4-6 사용
-v0.2 — claude-opus-4-7 로 교체 (강력한 교차 검증)
+v0.2 — claude-opus-4-7 로 교체 (강력한 교차 검증, 할루시네이션 감지 정밀도 향상)
+
+[v0.2 변경 이유]
+Sonnet으로 검증 시 기술 정보 오류와 hallucination을 놓치는 사례가 발생.
+최종 검증 단계는 추론 품질이 가장 중요하므로 Opus 4.7로 교체.
+비용은 증가하지만 검증 신뢰도가 핵심이므로 트레이드오프 수용.
 """
 import json
 import logging
@@ -13,8 +18,8 @@ import anthropic
 
 logger = logging.getLogger(__name__)
 
-# v0.1: Sonnet 사용 (v0.2 에서 Opus로 교체)
-MODEL = "claude-sonnet-4-6"
+# v0.2: Opus 4.7로 교체 — 최종 검증은 최고 품질 모델 사용
+MODEL = "claude-opus-4-7"
 
 SYSTEM_PROMPT = """당신은 AI가 생성한 학습 커리큘럼을 검증하는 시니어 엔지니어입니다.
 커리큘럼의 기술적 정확성, 할루시네이션 여부, 자료 신뢰도를 엄격히 검토합니다.

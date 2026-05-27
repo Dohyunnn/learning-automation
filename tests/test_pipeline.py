@@ -226,6 +226,20 @@ class TestCritic:
         assert result["passed"] is False
         assert len(result["issues"]) > 0
 
+    def test_critic_uses_opus_model(self):
+        """v0.2: Critic이 Opus 4.7 모델을 사용하는지 확인."""
+        from agents.critic import MODEL, Critic
+
+        assert MODEL == "claude-opus-4-7", (
+            f"Critic은 Opus 4.7을 사용해야 합니다. 현재: {MODEL}"
+        )
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _make_mock_response(
+            MOCK_VALIDATION_PASSED
+        )
+        critic = Critic(client=mock_client)
+        assert critic.model == "claude-opus-4-7"
+
 
 # ─── Unit: Routing Logic ─────────────────────────────────────────────────────
 

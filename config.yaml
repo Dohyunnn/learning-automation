@@ -1,11 +1,11 @@
 models:
-  # NOTE: 초기 구현은 sonnet 단일 모델 사용
-  # v0.2 에서 critic → opus 교체
-  # v0.3 에서 classifier → haiku 분리 (3-tier)
+  # v0.1 — 단일 Sonnet 모델
+  # v0.2 — critic → Opus 4.7 교체 (검증 품질 강화)
+  # v0.3 — profile_analyzer → Haiku 4.5 분리 (3-tier 비용 최적화)
   profile_analyzer: "claude-sonnet-4-6"
   curriculum_designer: "claude-sonnet-4-6"
   resource_curator: "claude-sonnet-4-6"
-  critic: "claude-sonnet-4-6"
+  critic: "claude-opus-4-7"    # v0.2: Sonnet → Opus (강력한 교차 검증)
 
 pipeline:
   max_retry: 2

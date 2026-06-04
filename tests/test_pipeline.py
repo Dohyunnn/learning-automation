@@ -384,6 +384,8 @@ class TestIntegrationPipeline:
                 "curriculum": None,
                 "resources": None,
                 "validation_result": None,
+                "review_score": None,
+                "review_feedback": None,
                 "retry_count": 0,
                 "final_markdown": None,
                 "confluence_page_id": None,
@@ -397,3 +399,233 @@ class TestIntegrationPipeline:
         assert result.get("curriculum") == MOCK_CURRICULUM
         # Confluence 실패 → errors에 기록
         assert isinstance(result.get("errors"), list)
+
+
+# ─── Unit: 도구 실행 함수 (tools.py) ─────────────────────────────────────────
+
+class TestToolExecutors:
+    """tools.py 로컬 실행 함수 단위 테스트."""
+
+    def test_classify_tech_stack_python_backend(self):
+        """Python 중심 레포 → backend 분류."""
+        from agents.tools import execute_classify_tech_stack
+
+        result = json.loads(execute_classify_tech_stack({
+            "languages": {"Python": 8000, "Dockerfile": 200},
+            "keywords": ["FastAPI", "REST API"],
+            "topic": "FastAPI",
+        }))
+
+        assert "Python" in result["top_languages"]
+        assert result["stack_type"] == "backend"
+        assert result["topic_familiarity"] == "experienced"
+
+    def test_estimate_duration_advanced_no_prior(self):
+        """advanced + 사전 지식 없음 → 30시간."""
+        from agents.tools import execute_estimate_duration
+
+        result = json.loads(execute_estimate_duration({
+            "topic": "LangGraph",
+            "depth": "advanced",
+            "stage_count": 3,
+            "has_prior_knowledge": False,
+        }))
+
+        assert result["total_hours"] == 30
+        assert result["hours_per_stage"] == 10.0
+
+    def test_estimate_duration_with_prior_knowledge(self):
+        """사전 지식 있으면 30% 시간 단축."""
+        from agents.tools import execute_estimate_duration
+
+        result = json.loads(execute_estimate_duration({
+            "topic": "LangGraph",
+            "depth": "advanced",
+            "stage_count": 3,
+            "has_prior_knowledge": True,
+        }))
+
+        assert result["total_hours"] == 21  # 30 * 0.7
+
+    def test_score_curriculum_passes_good_curriculum(self):
+        """모든 항목 충족 커리큘럼 → 0.75 이상."""
+        from agents.tools import execute_score_curriculum
+
+        result = json.loads(execute_score_curriculum({
+            "has_clear_objectives": True,
+            "stage_count": 3,
+            "total_hours": 20,
+            "hours_realistic": True,
+            "depth_match": True,
+            "has_hands_on": True,
+            "issues_found": [],
+            "hallucination_risk": "low",
+        }))
+
+        assert result["passed"] is True
+        assert result["score"] >= 0.75
+
+    def test_score_curriculum_fails_bad_curriculum(self):
+        """문제 다수 + hallucination high → 0.75 미만."""
+        from agents.tools import execute_score_curriculum
+
+        result = json.loads(execute_score_curriculum({
+            "has_clear_objectives": False,
+            "stage_count": 1,
+            "total_hours": 200,
+            "hours_realistic": False,
+            "depth_match": False,
+            "has_hands_on": False,
+            "issues_found": ["시간 비현실적", "목표 불명확", "수준 부적합"],
+            "hallucination_risk": "high",
+        }))
+
+        assert result["passed"] is False
+        assert result["score"] < 0.75
+
+    def test_dispatch_tool_routes_correctly(self):
+        """dispatch_tool 이 올바른 실행 함수를 호출하는지 확인."""
+        from agents.tools import dispatch_tool
+
+        result = json.loads(dispatch_tool("classify_tech_stack", {
+            "languages": {"Python": 5000},
+            "keywords": [],
+            "topic": "Python",
+        }))
+        assert "top_languages" in result
+
+        result2 = json.loads(dispatch_tool("unknown_tool", {}))
+        assert "error" in result2
+
+
+# ─── Unit: tool_use 패턴 ─────────────────────────────────────────────────────
+
+class TestToolUsePattern:
+    """tool_use 멀티턴 패턴 검증."""
+
+    def _make_tool_use_response(self, tool_name: str, tool_input: dict) -> MagicMock:
+        """stop_reason=tool_use 인 mock 응답."""
+        mock_resp = MagicMock()
+        tool_block = MagicMock()
+        tool_block.type = "tool_use"
+        tool_block.name = tool_name
+        tool_block.input = tool_input
+        tool_block.id = "tool_123"
+        mock_resp.content = [tool_block]
+        mock_resp.stop_reason = "tool_use"
+        mock_resp.usage = MagicMock(
+            input_tokens=100, output_tokens=50,
+            cache_read_input_tokens=0, cache_creation_input_tokens=0,
+        )
+        return mock_resp
+
+    def test_profile_analyzer_handles_tool_use_flow(self):
+        """ProfileAnalyzer 가 tool_use → tool_result → final 2-turn 흐름을 처리."""
+        from agents.profile_analyzer import ProfileAnalyzer
+
+        tool_resp = self._make_tool_use_response(
+            "classify_tech_stack",
+            {"languages": {"Python": 8000}, "keywords": ["FastAPI"], "topic": "FastAPI"},
+        )
+        final_resp = _make_mock_response(MOCK_PROFILE)
+
+        mock_client = MagicMock()
+        mock_client.messages.create.side_effect = [tool_resp, final_resp]
+
+        analyzer = ProfileAnalyzer(client=mock_client)
+        result = analyzer.analyze("FastAPI", MOCK_GITHUB_DATA, [])
+
+        # 2번 호출: 1차(도구 요청) + 2차(결과 반영)
+        assert mock_client.messages.create.call_count == 2
+        assert "tech_stack" in result
+
+    def test_curriculum_designer_passes_feedback_on_retry(self):
+        """재시도 시 critic_feedback 가 메시지에 포함되는지 확인."""
+        from agents.curriculum_designer import CurriculumDesigner
+
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = _make_mock_response(MOCK_CURRICULUM)
+
+        designer = CurriculumDesigner(client=mock_client)
+        designer.design(
+            topic="FastAPI",
+            depth="intermediate",
+            user_profile=MOCK_PROFILE,
+            critic_feedback=MOCK_VALIDATION_FAILED,  # 재시도 피드백
+        )
+
+        # 시스템 프롬프트에 RETRY_ADDENDUM 이 포함되어야 함
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        system = call_kwargs.get("system", [])
+        system_text = "".join(
+            b.get("text", "") for b in system if isinstance(b, dict)
+        )
+        assert "재작성 모드" in system_text
+
+
+# ─── Unit: Reviewer → Writer 피드백 루프 ─────────────────────────────────────
+
+class TestReviewerWriterLoop:
+    """Reviewer 실패 → Writer 피드백 루프 검증."""
+
+    def test_validate_node_writes_review_score_to_state(self):
+        """validate 노드가 review_score 와 review_feedback 을 State 에 기록."""
+        from graph.nodes import validate
+
+        with patch("agents.critic.Critic.validate", return_value=MOCK_VALIDATION_FAILED):
+            state = {
+                "topic": "FastAPI", "depth": "intermediate",
+                "curriculum": MOCK_CURRICULUM, "resources": MOCK_RESOURCES,
+                "user_profile": MOCK_PROFILE, "retry_count": 0,
+            }
+            updates = validate(state)
+
+        assert updates["review_score"] == MOCK_VALIDATION_FAILED["score"]
+        assert updates["review_feedback"] is not None
+        assert "학습 시간이 부족함" in updates["review_feedback"]
+
+    def test_design_curriculum_passes_feedback_on_retry(self):
+        """retry_count > 0 이면 design_curriculum 이 critic_feedback 를 전달."""
+        from graph.nodes import design_curriculum
+
+        received_feedback = {}
+
+        def capture_design(topic, depth, user_profile, critic_feedback=None):
+            received_feedback["feedback"] = critic_feedback
+            return MOCK_CURRICULUM
+
+        with patch("agents.curriculum_designer.CurriculumDesigner.design",
+                   side_effect=capture_design):
+            state = {
+                "topic": "FastAPI", "depth": "intermediate",
+                "user_profile": MOCK_PROFILE,
+                "validation_result": MOCK_VALIDATION_FAILED,
+                "retry_count": 1,  # 재시도 상황
+            }
+            design_curriculum(state)
+
+        # 피드백이 전달되었는지 확인
+        assert received_feedback["feedback"] is not None
+        assert received_feedback["feedback"]["passed"] is False
+
+    def test_design_curriculum_no_feedback_on_first_call(self):
+        """첫 호출(retry_count=0)에서는 critic_feedback=None 이어야 함."""
+        from graph.nodes import design_curriculum
+
+        received_feedback = {}
+
+        def capture_design(topic, depth, user_profile, critic_feedback=None):
+            received_feedback["feedback"] = critic_feedback
+            return MOCK_CURRICULUM
+
+        with patch("agents.curriculum_designer.CurriculumDesigner.design",
+                   side_effect=capture_design):
+            state = {
+                "topic": "FastAPI", "depth": "intermediate",
+                "user_profile": MOCK_PROFILE,
+                "validation_result": None,
+                "retry_count": 0,  # 첫 호출
+            }
+            design_curriculum(state)
+
+        assert received_feedback["feedback"] is None

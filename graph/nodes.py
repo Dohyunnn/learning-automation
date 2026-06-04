@@ -45,21 +45,38 @@ def analyze_profile(state: LearningState) -> dict[str, Any]:
     return {"user_profile": profile}
 
 
-# ─── Tier 2: 커리큘럼 설계 ───────────────────────────────────────────────────
+# ─── Tier 2: 커리큘럼 설계 (Writer) ─────────────────────────────────────────
 
 def design_curriculum(state: LearningState) -> dict[str, Any]:
-    """단계별 학습 커리큘럼을 설계한다."""
+    """단계별 학습 커리큘럼을 설계한다.
+
+    재시도(retry) 시 State 의 validation_result 를 critic_feedback 으로 전달해
+    Writer 가 Reviewer 피드백을 반영해 재작성하도록 한다.
+    blind retry → feedback-driven targeted retry.
+    """
     from agents.curriculum_designer import CurriculumDesigner
+
+    # Reviewer(Critic) 피드백 추출 — 첫 호출이면 None
+    critic_feedback: dict | None = None
+    validation = state.get("validation_result")
+    if validation and state.get("retry_count", 0) > 0:
+        critic_feedback = validation
+        logger.info(
+            "[Node] design_curriculum 재작성 모드 — feedback issues=%s",
+            validation.get("issues", []),
+        )
 
     designer = CurriculumDesigner()
     curriculum = designer.design(
         topic=state["topic"],
         depth=state["depth"],
         user_profile=state["user_profile"] or {},
+        critic_feedback=critic_feedback,          # ← 피드백 전달
     )
     logger.info(
-        "[Node] design_curriculum 완료 — stages=%d",
+        "[Node] design_curriculum 완료 — stages=%d retry=%d",
         len(curriculum.get("stages", [])),
+        state.get("retry_count", 0),
     )
     return {"curriculum": curriculum}
 
@@ -83,7 +100,12 @@ def curate_resources(state: LearningState) -> dict[str, Any]:
 # ─── Tier 3: 검증 ────────────────────────────────────────────────────────────
 
 def validate(state: LearningState) -> dict[str, Any]:
-    """커리큘럼과 리소스의 품질을 검증한다."""
+    """커리큘럼과 리소스의 품질을 검증한다 (Reviewer 역할).
+
+    검증 결과를 validation_result(raw) 와
+    review_score / review_feedback(명시적 State 필드) 에 동시에 기록한다.
+    review_feedback 은 다음 retry 에서 Writer(CurriculumDesigner) 로 전달된다.
+    """
     from agents.critic import Critic
 
     critic = Critic()
@@ -93,14 +115,30 @@ def validate(state: LearningState) -> dict[str, Any]:
         resources=state["resources"] or [],
         user_profile=state["user_profile"] or {},
     )
+
+    score: float = result.get("score", 0.0)
+    issues: list[str] = result.get("issues", [])
+    corrections: list[str] = result.get("corrections", [])
+    summary: str = result.get("summary", "")
+
+    # Writer 루프백 시 전달할 피드백 요약
+    feedback_lines = [summary] if summary else []
+    for i, issue in enumerate(issues):
+        fix = corrections[i] if i < len(corrections) else ""
+        feedback_lines.append(f"- {issue}" + (f" → {fix}" if fix else ""))
+    review_feedback = "\n".join(feedback_lines) if feedback_lines else None
+
     retry_count = state.get("retry_count", 0)
     logger.info(
-        "[Node] validate 완료 — passed=%s score=%.2f retry=%d",
-        result.get("passed"),
-        result.get("score", 0.0),
-        retry_count,
+        "[Node] validate(Reviewer) 완료 — passed=%s score=%.2f retry=%d",
+        result.get("passed"), score, retry_count,
     )
-    return {"validation_result": result}
+
+    return {
+        "validation_result": result,
+        "review_score": score,               # State 명시적 필드
+        "review_feedback": review_feedback,  # Writer 재호출 시 사용
+    }
 
 
 # ─── 출력 ────────────────────────────────────────────────────────────────────
